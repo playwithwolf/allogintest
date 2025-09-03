@@ -21,13 +21,22 @@ class AlipayService:
             # 验证配置
             alipay_config.validate_config()
             
+            # 调试：检查配置参数类型
+            logger.info(f"app_id类型: {type(alipay_config.app_id)}, 值: {alipay_config.app_id}")
+            logger.info(f"sign_type类型: {type(alipay_config.sign_type)}, 值: {alipay_config.sign_type}")
+            logger.info(f"gateway_url类型: {type(alipay_config.gateway_url)}, 值: {alipay_config.gateway_url}")
+            
             # 创建支付宝客户端配置
             self.alipay_client_config = AlipayClientConfig()
-            self.alipay_client_config.server_url = alipay_config.gateway_url
-            self.alipay_client_config.app_id = alipay_config.app_id
-            self.alipay_client_config.app_private_key = alipay_config.get_private_key()
-            self.alipay_client_config.alipay_public_key = alipay_config.get_public_key()
-            self.alipay_client_config.sign_type = alipay_config.sign_type
+            self.alipay_client_config.server_url = str(alipay_config.gateway_url)
+            self.alipay_client_config.app_id = str(alipay_config.app_id)
+            self.alipay_client_config.app_private_key = str(alipay_config.get_private_key())
+            self.alipay_client_config.alipay_public_key = str(alipay_config.get_public_key())
+            self.alipay_client_config.sign_type = str(alipay_config.sign_type)
+
+            logger.info(self.alipay_client_config.app_private_key)
+
+            logger.info(self.alipay_client_config.alipay_public_key)
             
             # 创建支付宝客户端
             self.alipay_client = DefaultAlipayClient(alipay_client_config=self.alipay_client_config)
@@ -49,21 +58,18 @@ class AlipayService:
             str: 授权URL
         """
         try:
-            # URL编码回调地址
-            encoded_redirect_uri = urllib.parse.quote(redirect_uri, safe='')
-            
-            # 构建授权URL参数
+            # 构建授权URL参数 - redirect_uri不需要预先编码
             params = {
                 'app_id': alipay_config.app_id,
                 'scope': alipay_config.scope,
-                'redirect_uri': encoded_redirect_uri
+                'redirect_uri': redirect_uri
             }
             
             # 添加state参数（可选）
             if state:
                 params['state'] = state
             
-            # 构建完整的授权URL
+            # 构建完整的授权URL - urlencode会自动处理编码
             query_string = urllib.parse.urlencode(params)
             auth_url = f"{alipay_config.oauth_gateway_url}?{query_string}"
             
@@ -89,16 +95,36 @@ class AlipayService:
             request.grant_type = "authorization_code"
             request.code = auth_code
             
+            # 调试：检查请求参数类型
+            logger.info(f"grant_type类型: {type(request.grant_type)}, 值: {request.grant_type}")
+            logger.info(f"code类型: {type(request.code)}, 值: {request.code}")
+            logger.info(f"auth_code参数类型: {type(auth_code)}, 值: {auth_code}")
+            
             # 执行请求
+            logger.info("开始执行支付宝API请求...")
+            logger.info(f"开始获取访问令牌，授权码: {auth_code}")
             response = self.alipay_client.execute(request)
+            logger.info(f"支付宝API响应: {response}")
+            
+            # 记录完整的响应信息用于调试
+            logger.info(f"支付宝API响应: code={getattr(response, 'code', None)}, msg={getattr(response, 'msg', None)}, sub_code={getattr(response, 'sub_code', None)}, sub_msg={getattr(response, 'sub_msg', None)}")
             
             # 检查响应
             if hasattr(response, 'code') and response.code == '10000':
+                # 安全地转换数值类型字段
+                def safe_int(value, default=0):
+                    try:
+                        if isinstance(value, (list, tuple)) and len(value) > 0:
+                            return int(value[0])
+                        return int(value) if value is not None else default
+                    except (ValueError, TypeError):
+                        return default
+                
                 token_info = {
                     'access_token': response.access_token,
-                    'expires_in': int(response.expires_in),
+                    'expires_in': safe_int(getattr(response, 'expires_in', None)),
                     'refresh_token': response.refresh_token,
-                    're_expires_in': int(response.re_expires_in),
+                    're_expires_in': safe_int(getattr(response, 're_expires_in', None)),
                     'user_id': getattr(response, 'user_id', None),
                     'open_id': getattr(response, 'open_id', None),
                     'auth_start': getattr(response, 'auth_start', None)
@@ -107,9 +133,18 @@ class AlipayService:
                 logger.info(f"获取访问令牌成功，用户ID: {token_info.get('user_id')}")
                 return token_info
             else:
-                error_msg = f"获取访问令牌失败: {getattr(response, 'msg', '未知错误')}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
+                # 详细的错误信息
+                error_code = getattr(response, 'code', 'unknown')
+                error_msg = getattr(response, 'msg', '未知错误')
+                sub_code = getattr(response, 'sub_code', None)
+                sub_msg = getattr(response, 'sub_msg', None)
+                
+                detailed_error = f"获取访问令牌失败 - 错误码: {error_code}, 错误信息: {error_msg}"
+                if sub_code:
+                    detailed_error += f", 子错误码: {sub_code}, 子错误信息: {sub_msg}"
+                
+                logger.error(detailed_error)
+                raise Exception(detailed_error)
                 
         except Exception as e:
             logger.error(f"获取访问令牌异常: {str(e)}")
@@ -180,11 +215,20 @@ class AlipayService:
             
             # 检查响应
             if hasattr(response, 'code') and response.code == '10000':
+                # 安全地转换数值类型字段
+                def safe_int(value, default=0):
+                    try:
+                        if isinstance(value, (list, tuple)) and len(value) > 0:
+                            return int(value[0])
+                        return int(value) if value is not None else default
+                    except (ValueError, TypeError):
+                        return default
+                
                 token_info = {
                     'access_token': response.access_token,
-                    'expires_in': int(response.expires_in),
+                    'expires_in': safe_int(getattr(response, 'expires_in', None)),
                     'refresh_token': response.refresh_token,
-                    're_expires_in': int(response.re_expires_in),
+                    're_expires_in': safe_int(getattr(response, 're_expires_in', None)),
                     'user_id': getattr(response, 'user_id', None),
                     'open_id': getattr(response, 'open_id', None),
                     'auth_start': getattr(response, 'auth_start', None)

@@ -65,15 +65,25 @@ async def alipay_auth(request: Request):
 @app.get("/auth/alipay/callback")
 async def alipay_callback(auth_code: Optional[str] = None, state: Optional[str] = None):
     """支付宝授权回调处理"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"收到支付宝回调请求 - auth_code: {auth_code}, state: {state}")
+    
     if not auth_code:
+        logger.error("授权码为空")
         raise HTTPException(status_code=400, detail="授权码不能为空")
     
     try:
+        logger.info(f"开始获取访问令牌，授权码: {auth_code[:10]}...")
         # 使用授权码获取访问令牌
         token_info = alipay_service.get_access_token(auth_code)
+        logger.info(f"成功获取访问令牌: {token_info}")
         
         # 使用访问令牌获取用户信息
+        logger.info(f"开始获取用户信息，访问令牌: {token_info['access_token'][:10]}...")
         user_info = alipay_service.get_user_info(token_info['access_token'])
+        logger.info(f"成功获取用户信息: {user_info}")
         
         # 这里可以将用户信息保存到数据库
         # 返回成功页面或重定向到用户主页
@@ -87,6 +97,7 @@ async def alipay_callback(auth_code: Optional[str] = None, state: Optional[str] 
             }
         }
     except Exception as e:
+        logger.error(f"登录失败，详细错误: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")
 
 @app.post("/api/user/info")
