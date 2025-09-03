@@ -115,6 +115,29 @@
             word-break: break-all;
         }
         
+        .status-positive {
+            color: #52c41a !important;
+            font-weight: 600;
+        }
+        
+        .status-negative {
+            color: #ff4d4f !important;
+            font-weight: 600;
+        }
+        
+        .user-email {
+            color: #1890ff !important;
+            text-decoration: underline;
+        }
+        
+        .user-id {
+            font-family: 'Courier New', monospace;
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
         .actions {
             display: flex;
             gap: 15px;
@@ -224,8 +247,18 @@
             </div>
             
             <div class="info-item">
+                <span class="info-label">显示名称</span>
+                <span class="info-value" id="displayName">-</span>
+            </div>
+            
+            <div class="info-item">
                 <span class="info-label">用户ID</span>
                 <span class="info-value" id="userId">-</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">邮箱</span>
+                <span class="info-value" id="email">-</span>
             </div>
             
             <div class="info-item">
@@ -234,13 +267,33 @@
             </div>
             
             <div class="info-item">
+                <span class="info-label">年龄</span>
+                <span class="info-value" id="age">-</span>
+            </div>
+            
+            <div class="info-item">
                 <span class="info-label">地区</span>
                 <span class="info-value" id="location">-</span>
             </div>
             
             <div class="info-item">
+                <span class="info-label">国家代码</span>
+                <span class="info-value" id="countryCode">-</span>
+            </div>
+            
+            <div class="info-item">
                 <span class="info-label">认证状态</span>
                 <span class="info-value" id="certified">-</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">用户类型</span>
+                <span class="info-value" id="userType">-</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">账户状态</span>
+                <span class="info-value" id="userStatus">-</span>
             </div>
         </div>
         
@@ -301,16 +354,50 @@
             }
             
             document.getElementById('nickName').textContent = userInfo.nick_name || '未设置';
-            document.getElementById('userId').textContent = userInfo.user_id || userInfo.open_id || '-';
+            document.getElementById('displayName').textContent = userInfo.display_name || '未设置';
+            
+            const userIdElement = document.getElementById('userId');
+            userIdElement.textContent = userInfo.user_id || userInfo.open_id || '-';
+            if (userInfo.user_id || userInfo.open_id) {
+                userIdElement.className = 'info-value user-id';
+            }
+            
+            const emailElement = document.getElementById('email');
+            emailElement.textContent = userInfo.email || '未设置';
+            if (userInfo.email) {
+                emailElement.className = 'info-value user-email';
+            }
             
             const genderMap = { 'm': '男', 'f': '女' };
             document.getElementById('gender').textContent = genderMap[userInfo.gender] || '未设置';
             
+            document.getElementById('age').textContent = userInfo.age ? userInfo.age + '岁' : '未设置';
+            
             const location = [userInfo.province, userInfo.city].filter(Boolean).join(' ');
             document.getElementById('location').textContent = location || '未设置';
             
-            const certified = userInfo.is_certified === 'T' ? '已认证' : '未认证';
-            document.getElementById('certified').textContent = certified;
+            document.getElementById('countryCode').textContent = userInfo.country_code || '未设置';
+            
+            const certifiedElement = document.getElementById('certified');
+            if (userInfo.is_certified === 'T') {
+                certifiedElement.textContent = '✅ 已认证';
+                certifiedElement.className = 'info-value status-positive';
+            } else {
+                certifiedElement.textContent = '❌ 未认证';
+                certifiedElement.className = 'info-value status-negative';
+            }
+            
+            const userTypeMap = { '1': '个人用户', '2': '企业用户' };
+            document.getElementById('userType').textContent = userTypeMap[userInfo.user_type] || '未知类型';
+            
+            const userStatusElement = document.getElementById('userStatus');
+            if (userInfo.user_status === 'T') {
+                userStatusElement.textContent = '✅ 正常';
+                userStatusElement.className = 'info-value status-positive';
+            } else {
+                userStatusElement.textContent = '❌ 异常';
+                userStatusElement.className = 'info-value status-negative';
+            }
             
             // 显示令牌信息（开发调试用）
             if (tokenInfo) {

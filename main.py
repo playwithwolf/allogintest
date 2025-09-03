@@ -86,16 +86,18 @@ async def alipay_callback(auth_code: Optional[str] = None, state: Optional[str] 
         logger.info(f"成功获取用户信息: {user_info}")
         
         # 这里可以将用户信息保存到数据库
-        # 返回成功页面或重定向到用户主页
-        return {
-            "success": True,
-            "message": "登录成功",
-            "user_info": user_info,
-            "token_info": {
-                "access_token": token_info['access_token'],
-                "expires_in": token_info['expires_in']
-            }
-        }
+        # 重定向到成功页面并传递用户信息
+        import urllib.parse
+        import json
+        
+        user_info_encoded = urllib.parse.quote(json.dumps(user_info, ensure_ascii=False))
+        token_info_encoded = urllib.parse.quote(json.dumps({
+            "access_token": token_info['access_token'],
+            "expires_in": token_info['expires_in']
+        }, ensure_ascii=False))
+        
+        success_url = f"/static/success.html?user_info={user_info_encoded}&token={token_info_encoded}"
+        return RedirectResponse(url=success_url, status_code=302)
     except Exception as e:
         logger.error(f"登录失败，详细错误: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")
