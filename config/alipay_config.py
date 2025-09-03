@@ -20,7 +20,7 @@ class AlipayConfig(BaseSettings):
     version: str = Field(default="1.0", description="API版本")
     
     # OAuth授权配置
-    oauth_gateway_url: str = Field(default="https://openauth.alipaydev.com/oauth2/publicAppAuthorize.htm", description="OAuth授权网关地址")
+    oauth_gateway_url: str = Field(default="https://openauth-sandbox.dl.alipaydev.com/oauth2/publicAppAuthorize.htm", description="OAuth授权网关地址")
     
     # 授权范围
     scope: str = Field(default="auth_user", description="授权范围")

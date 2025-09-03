@@ -1,11 +1,15 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 import os
 from typing import Optional
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 # 导入自定义模块
 from config.alipay_config import AlipayConfig
@@ -39,9 +43,9 @@ async def root():
     with open("static/login.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
-@app.get("/auth/alipay")
+@app.post("/auth/alipay")
 async def alipay_auth(request: Request):
-    """支付宝授权登录 - 重定向到支付宝授权页面"""
+    """支付宝授权登录 - 返回授权URL"""
     try:
         # 构建回调URL
         base_url = str(request.base_url).rstrip('/')
@@ -50,7 +54,11 @@ async def alipay_auth(request: Request):
         # 生成授权URL
         auth_url = alipay_service.get_auth_url(redirect_uri)
         
-        return RedirectResponse(url=auth_url)
+        return JSONResponse({
+            "success": True,
+            "auth_url": auth_url,
+            "message": "授权URL生成成功"
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"授权失败: {str(e)}")
 
@@ -81,7 +89,7 @@ async def alipay_callback(auth_code: Optional[str] = None, state: Optional[str] 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"登录失败: {str(e)}")
 
-@app.get("/api/user/info")
+@app.post("/api/user/info")
 async def get_user_info(access_token: str):
     """获取用户信息API"""
     try:

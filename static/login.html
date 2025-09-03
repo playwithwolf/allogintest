@@ -212,8 +212,33 @@
             btnEl.style.opacity = '0.6';
             
             try {
-                // 跳转到支付宝授权页面
-                window.location.href = '/auth/alipay';
+                // 发送POST请求到支付宝授权接口
+                fetch('/auth/alipay', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({})
+                })
+                .then(response => {
+                    if (response.redirected) {
+                        // 如果服务器返回重定向，跳转到授权页面
+                        window.location.href = response.url;
+                    } else {
+                        return response.json();
+                    }
+                })
+                .then(data => {
+                    if (data && data.auth_url) {
+                        // 跳转到支付宝授权页面
+                        window.location.href = data.auth_url;
+                    }
+                })
+                .catch(error => {
+                    console.error('登录失败:', error);
+                    showError('登录失败，请稍后重试');
+                    resetButton();
+                });
             } catch (error) {
                 console.error('登录失败:', error);
                 showError('登录失败，请稍后重试');
