@@ -15,6 +15,13 @@ load_dotenv()
 from config.alipay_config import AlipayConfig
 from services.alipay_service import AlipayService
 from models.user_models import UserInfo, LoginResponse
+from pydantic import BaseModel
+
+# 请求模型
+class AuthInfoRequest(BaseModel):
+    pid: str
+    target_id: Optional[str] = None
+    rsa2: Optional[bool] = True
 
 app = FastAPI(
     title="支付宝H5登录系统",
@@ -113,6 +120,78 @@ async def get_user_info(access_token: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取用户信息失败: {str(e)}")
+
+@app.post("/api/auth/authinfo")
+async def generate_auth_info(request: AuthInfoRequest):
+    """生成authInfo - 供Android应用调用
+    
+    Args:
+        request: 包含pid、target_id和rsa2参数的请求体
+        
+    Returns:
+        dict: 包含authInfo字符串的响应
+    """
+    try:
+        # 调用支付宝服务生成authInfo
+        auth_info = alipay_service.generate_auth_info(
+            pid=request.pid,
+            target_id=request.target_id,
+            rsa2=request.rsa2
+        )
+        
+        return {
+            "success": True,
+            "data": {
+                "authInfo": auth_info,
+                "pid": request.pid,
+                "target_id": request.target_id or "auto_generated",
+                "sign_type": "RSA2" if request.rsa2 else "RSA"
+            },
+            "message": "authInfo生成成功"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"生成authInfo失败: {str(e)}"
+        )
+
+@app.get("/api/auth/authinfo/{pid}")
+async def generate_auth_info_get(pid: str, target_id: Optional[str] = None, rsa2: Optional[bool] = True):
+    """生成authInfo - GET方式，供Android应用调用
+    
+    Args:
+        pid: 商户签约拿到的pid
+        target_id: 商户唯一标识，可选
+        rsa2: 是否使用RSA2签名，默认True
+        
+    Returns:
+        dict: 包含authInfo字符串的响应
+    """
+    try:
+        # 调用支付宝服务生成authInfo
+        auth_info = alipay_service.generate_auth_info(
+            pid=pid,
+            target_id=target_id,
+            rsa2=rsa2
+        )
+        
+        return {
+            "success": True,
+            "data": {
+                "authInfo": auth_info,
+                "pid": pid,
+                "target_id": target_id or "auto_generated",
+                "sign_type": "RSA2" if rsa2 else "RSA"
+            },
+            "message": "authInfo生成成功"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"生成authInfo失败: {str(e)}"
+        )
 
 @app.get("/health")
 async def health_check():

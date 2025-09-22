@@ -1,11 +1,17 @@
 import urllib.parse
 import logging
 import json
+import time
+import random
+import base64
 from typing import Dict, Any
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from alipay.aop.api.AlipayClientConfig import AlipayClientConfig
 from alipay.aop.api.DefaultAlipayClient import DefaultAlipayClient
 from alipay.aop.api.request.AlipaySystemOauthTokenRequest import AlipaySystemOauthTokenRequest
 from alipay.aop.api.request.AlipayUserInfoShareRequest import AlipayUserInfoShareRequest
+from alipay.aop.api.util import SignatureUtils
 from config.alipay_config import alipay_config
 from models.user_models import UserInfo, TokenInfo
 
@@ -368,4 +374,214 @@ class AlipayService:
                 
         except Exception as e:
             logger.error(f"刷新访问令牌异常: {str(e)}")
+            raise
+    
+    def build_auth_info_map(self, pid: str, target_id: str = None, rsa2: bool = True) -> Dict[str, str]:
+        """构造授权参数列表
+        参考Android SDK的OrderInfoUtil2_0.buildAuthInfoMap方法
+        
+        Args:
+            pid: 商户签约拿到的pid，如：2088102123816631
+            target_id: 商户唯一标识，如果不提供则自动生成
+            rsa2: 是否使用RSA2签名，默认True
+            
+        Returns:
+            Dict[str, str]: 授权参数字典
+        """
+        # 如果没有提供target_id，则自动生成
+        if not target_id:
+            target_id = f"auth_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+        
+        key_values = {
+            # 商户签约拿到的app_id
+            "app_id": alipay_config.app_id,
+            
+            # 商户签约拿到的pid
+            "pid": pid,
+            
+            # 服务接口名称，固定值
+            "apiname": "com.alipay.account.auth",
+            
+            # 服务接口名称，固定值
+            "methodname": "alipay.open.auth.sdk.code.get",
+            
+            # 商户类型标识，固定值
+            "app_name": "mc",
+            
+            # 业务类型，固定值
+            "biz_type": "openservice",
+            
+            # 产品码，固定值
+            "product_id": "APP_FAST_LOGIN",
+            
+            # 授权范围，固定值
+            "scope": "kuaijie",
+            
+            # 商户唯一标识
+            "target_id": target_id,
+            
+            # 授权类型，固定值
+            "auth_type": "AUTHACCOUNT",
+            
+            # 签名类型
+            "sign_type": "RSA2" if rsa2 else "RSA"
+        }
+        
+        return key_values
+    
+    def build_order_param(self, param_map: Dict[str, str]) -> str:
+        """构造订单参数信息
+        参考Android SDK的OrderInfoUtil2_0.buildOrderParam方法
+        
+        Args:
+            param_map: 参数字典
+            
+        Returns:
+            str: 参数字符串
+        """
+        keys = list(param_map.keys())
+        
+        sb = []
+        for i in range(len(keys) - 1):
+            key = keys[i]
+            value = param_map[key]
+            sb.append(self._build_key_value(key, value, True))
+            sb.append("&")
+        
+        tail_key = keys[-1]
+        tail_value = param_map[tail_key]
+        sb.append(self._build_key_value(tail_key, tail_value, True))
+        
+        return "".join(sb)
+    
+    def _build_key_value(self, key: str, value: str, is_encode: bool) -> str:
+        """拼接键值对
+        
+        Args:
+            key: 键
+            value: 值
+            is_encode: 是否编码
+            
+        Returns:
+            str: 键值对字符串
+        """
+        sb = [key, "="]
+        if is_encode:
+            try:
+                sb.append(urllib.parse.quote(value, safe=''))
+            except Exception:
+                sb.append(value)
+        else:
+            sb.append(value)
+        return "".join(sb)
+    
+    def get_sign(self, param_map: Dict[str, str], rsa_key: str, rsa2: bool = True) -> str:
+        """对支付参数信息进行签名
+        参考Android SDK的OrderInfoUtil2_0.getSign方法
+        
+        Args:
+            param_map: 待签名授权信息
+            rsa_key: RSA私钥
+            rsa2: 是否使用RSA2签名
+            
+        Returns:
+            str: 签名字符串
+        """
+        keys = list(param_map.keys())
+        # key排序
+        keys.sort()
+        
+        auth_info = []
+        for i in range(len(keys) - 1):
+            key = keys[i]
+            value = param_map[key]
+            auth_info.append(self._build_key_value(key, value, False))
+            auth_info.append("&")
+        
+        tail_key = keys[-1]
+        tail_value = param_map[tail_key]
+        auth_info.append(self._build_key_value(tail_key, tail_value, False))
+        
+        auth_info_str = "".join(auth_info)
+        
+        # 使用cryptography库进行RSA签名
+        try:
+            # 处理PKCS#1格式的私钥（支付宝非Java环境使用PKCS#1格式）
+            # 如果私钥没有PEM头部，添加PKCS#1格式的头部和尾部
+            if not rsa_key.startswith('-----BEGIN'):
+                # Base64字符串，添加PKCS#1格式的PEM头部
+                pem_private_key = f"-----BEGIN RSA PRIVATE KEY-----\n{rsa_key}\n-----END RSA PRIVATE KEY-----"
+            else:
+                pem_private_key = rsa_key
+            
+            # 加载PKCS#1格式的私钥
+            private_key = serialization.load_pem_private_key(
+                pem_private_key.encode('utf-8'),
+                password=None
+            )
+            
+            # 进行签名
+            if rsa2:
+                # RSA2使用SHA256
+                signature = private_key.sign(
+                    auth_info_str.encode('utf-8'),
+                    padding.PKCS1v15(),
+                    hashes.SHA256()
+                )
+            else:
+                # RSA使用SHA1
+                signature = private_key.sign(
+                    auth_info_str.encode('utf-8'),
+                    padding.PKCS1v15(),
+                    hashes.SHA1()
+                )
+            
+            # Base64编码签名结果
+            ori_sign = base64.b64encode(signature).decode('utf-8')
+            
+        except Exception as e:
+            logger.error(f"签名失败: {str(e)}")
+            raise
+        
+        # URL编码签名结果
+        try:
+            encoded_sign = urllib.parse.quote(ori_sign, safe='')
+        except Exception:
+            encoded_sign = ori_sign
+        
+        return f"sign={encoded_sign}"
+    
+    def generate_auth_info(self, pid: str, target_id: str = None, rsa2: bool = True) -> str:
+        """生成完整的authInfo字符串
+        供Android应用调用，生成用于支付宝授权的完整参数字符串
+        
+        Args:
+            pid: 商户签约拿到的pid
+            target_id: 商户唯一标识，如果不提供则自动生成
+            rsa2: 是否使用RSA2签名，默认True
+            
+        Returns:
+            str: 完整的authInfo字符串
+        """
+        try:
+            # 构建授权参数
+            auth_info_map = self.build_auth_info_map(pid, target_id, rsa2)
+            
+            # 构建参数字符串
+            info = self.build_order_param(auth_info_map)
+            
+            # 获取私钥 - 直接使用原始私钥字符串，不添加格式化标记
+            private_key = alipay_config.app_private_key
+            
+            # 生成签名
+            sign = self.get_sign(auth_info_map, private_key, rsa2)
+            
+            # 拼接完整的authInfo
+            auth_info = f"{info}&{sign}"
+            
+            logger.info(f"生成authInfo成功，target_id: {auth_info_map.get('target_id')}")
+            return auth_info
+            
+        except Exception as e:
+            logger.error(f"生成authInfo失败: {str(e)}")
             raise
