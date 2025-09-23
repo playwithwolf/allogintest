@@ -390,7 +390,11 @@ class AlipayService:
         """
         # 如果没有提供target_id，则自动生成
         if not target_id:
-            target_id = f"auth_{int(time.time() * 1000)}_{random.randint(1000, 9999)}"
+            import uuid
+            # 使用 UUID + 时间戳确保唯一性
+            timestamp = int(time.time() * 1000000)  # 微秒级时间戳
+            unique_id = str(uuid.uuid4()).replace('-', '')[:8]  # 8位UUID
+            target_id = f"auth_{timestamp}_{unique_id}"
         
         key_values = {
             # 商户签约拿到的app_id

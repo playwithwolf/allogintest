@@ -7,6 +7,7 @@ import uvicorn
 import os
 from typing import Optional
 from dotenv import load_dotenv
+import logging
 
 # 加载环境变量
 load_dotenv()
@@ -16,6 +17,7 @@ from config.alipay_config import AlipayConfig
 from services.alipay_service import AlipayService
 from models.user_models import UserInfo, LoginResponse
 from pydantic import BaseModel
+from rate_limiter import auth_rate_limiter
 
 # 请求模型
 class AuthInfoRequest(BaseModel):
@@ -122,54 +124,42 @@ async def get_user_info(access_token: str):
         raise HTTPException(status_code=500, detail=f"获取用户信息失败: {str(e)}")
 
 @app.post("/api/auth/authinfo")
-async def generate_auth_info(request: AuthInfoRequest):
-    """生成authInfo - 供Android应用调用
+async def generate_auth_info_post(request: Request):
+    """生成支付宝授权信息字符串 - POST方式
     
     Args:
         request: 包含pid、target_id和rsa2参数的请求体
         
     Returns:
-        dict: 包含authInfo字符串的响应
+        dict: 包含authInfo的响应
     """
-    try:
-        # 调用支付宝服务生成authInfo
-        auth_info = alipay_service.generate_auth_info(
-            pid=request.pid,
-            target_id=request.target_id,
-            rsa2=request.rsa2
-        )
-        
-        return {
-            "success": True,
-            "data": {
-                "authInfo": auth_info,
-                "pid": request.pid,
-                "target_id": request.target_id or "auto_generated",
-                "sign_type": "RSA2" if request.rsa2 else "RSA"
-            },
-            "message": "authInfo生成成功"
-        }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"生成authInfo失败: {str(e)}"
-        )
-
-@app.get("/api/auth/authinfo/{pid}")
-async def generate_auth_info_get(pid: str, target_id: Optional[str] = None, rsa2: Optional[bool] = True):
-    """生成authInfo - GET方式，供Android应用调用
+    import logging
+    logger = logging.getLogger(__name__)
     
-    Args:
-        pid: 商户签约拿到的pid
-        target_id: 商户唯一标识，可选
-        rsa2: 是否使用RSA2签名，默认True
-        
-    Returns:
-        dict: 包含authInfo字符串的响应
-    """
     try:
-        # 调用支付宝服务生成authInfo
+        # 获取客户端IP用于频率限制
+        client_ip = request.client.host
+        
+        # 检查频率限制
+        if not auth_rate_limiter.is_allowed(client_ip):
+            remaining_time = auth_rate_limiter.get_remaining_time(client_ip)
+            raise HTTPException(
+                status_code=429, 
+                detail=f"请求过于频繁，请等待 {remaining_time} 秒后再试。为避免触发支付宝限流，建议使用 refresh_token 刷新令牌。"
+            )
+        
+        # 解析请求体
+        body = await request.json()
+        pid = body.get('pid')
+        target_id = body.get('target_id')
+        rsa2 = body.get('rsa2', True)
+        
+        if not pid:
+            raise HTTPException(status_code=400, detail="pid不能为空")
+        
+        logger.info(f"收到生成authInfo请求，PID: {pid}, target_id: {target_id}")
+        
+        # 生成authInfo
         auth_info = alipay_service.generate_auth_info(
             pid=pid,
             target_id=target_id,
@@ -187,7 +177,67 @@ async def generate_auth_info_get(pid: str, target_id: Optional[str] = None, rsa2
             "message": "authInfo生成成功"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"生成authInfo失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"生成authInfo失败: {str(e)}"
+        )
+
+@app.get("/api/auth/authinfo/{pid}")
+async def generate_auth_info_get(request: Request, pid: str, target_id: Optional[str] = None, rsa2: Optional[bool] = True):
+    """生成支付宝授权信息字符串 - GET方式
+    
+    Args:
+        request: FastAPI请求对象
+        pid: 商户签约拿到的pid
+        target_id: 商户唯一标识，可选
+        rsa2: 是否使用RSA2签名，默认True
+        
+    Returns:
+        dict: 包含authInfo的响应
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # 获取客户端IP用于频率限制
+        client_ip = request.client.host
+        
+        # 检查频率限制
+        if not auth_rate_limiter.is_allowed(client_ip):
+            remaining_time = auth_rate_limiter.get_remaining_time(client_ip)
+            raise HTTPException(
+                status_code=429, 
+                detail=f"请求过于频繁，请等待 {remaining_time} 秒后再试。为避免触发支付宝限流，建议使用 refresh_token 刷新令牌。"
+            )
+        
+        logger.info(f"收到生成authInfo请求，PID: {pid}, target_id: {target_id}")
+        
+        # 生成authInfo
+        auth_info = alipay_service.generate_auth_info(
+            pid=pid,
+            target_id=target_id,
+            rsa2=rsa2
+        )
+        
+        return {
+            "success": True,
+            "data": {
+                "authInfo": auth_info,
+                "pid": pid,
+                "target_id": target_id or "auto_generated",
+                "sign_type": "RSA2" if rsa2 else "RSA"
+            },
+            "message": "authInfo生成成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"生成authInfo失败: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"生成authInfo失败: {str(e)}"
@@ -231,6 +281,8 @@ async def get_user_info_by_auth_code(request: Request):
                 "token_info": {
                     "access_token": token_info['access_token'],
                     "expires_in": token_info['expires_in'],
+                    "refresh_token": token_info.get('refresh_token'),  # 返回 refresh_token
+                    "re_expires_in": token_info.get('re_expires_in'),
                     "user_id": token_info['user_id'],
                     "open_id": token_info['open_id']
                 }
@@ -245,6 +297,55 @@ async def get_user_info_by_auth_code(request: Request):
         raise HTTPException(
             status_code=500,
             detail=f"获取用户信息失败: {str(e)}"
+        )
+
+@app.post("/api/auth/refresh")
+async def refresh_token_endpoint(request: Request):
+    """刷新访问令牌接口
+    
+    Args:
+        request: 包含refresh_token的请求体
+        
+    Returns:
+        dict: 包含新的访问令牌信息的响应
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # 解析请求体
+        body = await request.json()
+        refresh_token = body.get('refresh_token')
+        
+        if not refresh_token:
+            raise HTTPException(status_code=400, detail="refresh_token不能为空")
+        
+        logger.info(f"收到刷新令牌请求，refresh_token: {refresh_token[:20]}...")
+        
+        # 使用刷新令牌获取新的访问令牌
+        token_info = alipay_service.refresh_access_token(refresh_token)
+        logger.info(f"成功刷新访问令牌: {token_info}")
+        
+        return {
+            "success": True,
+            "data": {
+                "access_token": token_info['access_token'],
+                "expires_in": token_info['expires_in'],
+                "refresh_token": token_info['refresh_token'],
+                "re_expires_in": token_info['re_expires_in'],
+                "user_id": token_info['user_id'],
+                "open_id": token_info['open_id']
+            },
+            "message": "刷新访问令牌成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"刷新访问令牌失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"刷新访问令牌失败: {str(e)}"
         )
 
 @app.get("/health")

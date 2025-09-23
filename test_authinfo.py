@@ -19,7 +19,7 @@ def test_auth_info_generation():
     alipay_service = AlipayService()
     
     # 测试参数
-    test_pid = "2088102123816631"  # 示例PID，实际使用时需要替换为真实的PID
+    test_pid = "2088151008240524"  # 正确的PID
     
     try:
         print(f"\n1. 测试基本authInfo生成...")
