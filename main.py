@@ -193,6 +193,60 @@ async def generate_auth_info_get(pid: str, target_id: Optional[str] = None, rsa2
             detail=f"生成authInfo失败: {str(e)}"
         )
 
+@app.post("/api/auth/userinfo")
+async def get_user_info_by_auth_code(request: Request):
+    """通过authCode获取用户信息 - 供Android应用调用
+    
+    Args:
+        request: 包含authCode的请求体
+        
+    Returns:
+        dict: 包含用户信息的响应
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # 解析请求体
+        body = await request.json()
+        auth_code = body.get('authCode')
+        
+        if not auth_code:
+            raise HTTPException(status_code=400, detail="authCode不能为空")
+        
+        logger.info(f"收到获取用户信息请求，authCode: {auth_code[:10]}...")
+        
+        # 使用授权码获取访问令牌
+        token_info = alipay_service.get_access_token(auth_code)
+        logger.info(f"成功获取访问令牌: {token_info}")
+        
+        # 使用访问令牌获取用户信息
+        user_info = alipay_service.get_user_info(token_info['access_token'])
+        logger.info(f"成功获取用户信息: {user_info}")
+        
+        return {
+            "success": True,
+            "data": {
+                "user_info": user_info,
+                "token_info": {
+                    "access_token": token_info['access_token'],
+                    "expires_in": token_info['expires_in'],
+                    "user_id": token_info['user_id'],
+                    "open_id": token_info['open_id']
+                }
+            },
+            "message": "获取用户信息成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取用户信息失败: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取用户信息失败: {str(e)}"
+        )
+
 @app.get("/health")
 async def health_check():
     """健康检查接口"""
