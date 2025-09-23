@@ -12,6 +12,9 @@ import logging
 # 加载环境变量
 load_dotenv()
 
+# 配置日志
+logger = logging.getLogger(__name__)
+
 # 导入自定义模块
 from config.alipay_config import AlipayConfig
 from services.alipay_service import AlipayService
@@ -24,6 +27,10 @@ class AuthInfoRequest(BaseModel):
     pid: str
     target_id: Optional[str] = None
     rsa2: Optional[bool] = True
+
+class UserInfoRequest(BaseModel):
+    authCode: Optional[str] = None
+    auth_code: Optional[str] = None  # 兼容Java客户端发送的参数名
 
 app = FastAPI(
     title="支付宝H5登录系统",
@@ -243,61 +250,61 @@ async def generate_auth_info_get(request: Request, pid: str, target_id: Optional
             detail=f"生成authInfo失败: {str(e)}"
         )
 
-@app.post("/api/auth/userinfo")
-async def get_user_info_by_auth_code(request: Request):
-    """通过authCode获取用户信息 - 供Android应用调用
+# @app.post("/api/auth/userinfo")
+# async def get_user_info_by_auth_code(request: Request):
+#     """通过authCode获取用户信息 - 供Android应用调用
     
-    Args:
-        request: 包含authCode的请求体
+#     Args:
+#         request: 包含authCode的请求体
         
-    Returns:
-        dict: 包含用户信息的响应
-    """
-    import logging
-    logger = logging.getLogger(__name__)
+#     Returns:
+#         dict: 包含用户信息的响应
+#     """
+#     import logging
+#     logger = logging.getLogger(__name__)
     
-    try:
-        # 解析请求体
-        body = await request.json()
-        auth_code = body.get('authCode')
+#     try:
+#         # 解析请求体
+#         body = await request.json()
+#         auth_code = body.get('authCode')
         
-        if not auth_code:
-            raise HTTPException(status_code=400, detail="authCode不能为空")
+#         if not auth_code:
+#             raise HTTPException(status_code=400, detail="authCode不能为空")
         
-        logger.info(f"收到获取用户信息请求，authCode: {auth_code[:10]}...")
+#         logger.info(f"收到获取用户信息请求，authCode: {auth_code[:10]}...")
         
-        # 使用授权码获取访问令牌
-        token_info = alipay_service.get_access_token(auth_code)
-        logger.info(f"成功获取访问令牌: {token_info}")
+#         # 使用授权码获取访问令牌
+#         token_info = alipay_service.get_access_token(auth_code)
+#         logger.info(f"成功获取访问令牌: {token_info}")
         
-        # 使用访问令牌获取用户信息
-        user_info = alipay_service.get_user_info(token_info['access_token'])
-        logger.info(f"成功获取用户信息: {user_info}")
+#         # 使用访问令牌获取用户信息
+#         user_info = alipay_service.get_user_info(token_info['access_token'])
+#         logger.info(f"成功获取用户信息: {user_info}")
         
-        return {
-            "success": True,
-            "data": {
-                "user_info": user_info,
-                "token_info": {
-                    "access_token": token_info['access_token'],
-                    "expires_in": token_info['expires_in'],
-                    "refresh_token": token_info.get('refresh_token'),  # 返回 refresh_token
-                    "re_expires_in": token_info.get('re_expires_in'),
-                    "user_id": token_info['user_id'],
-                    "open_id": token_info['open_id']
-                }
-            },
-            "message": "获取用户信息成功"
-        }
+#         return {
+#             "success": True,
+#             "data": {
+#                 "user_info": user_info,
+#                 "token_info": {
+#                     "access_token": token_info['access_token'],
+#                     "expires_in": token_info['expires_in'],
+#                     "refresh_token": token_info.get('refresh_token'),  # 返回 refresh_token
+#                     "re_expires_in": token_info.get('re_expires_in'),
+#                     "user_id": token_info['user_id'],
+#                     "open_id": token_info['open_id']
+#                 }
+#             },
+#             "message": "获取用户信息成功"
+#         }
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取用户信息失败: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取用户信息失败: {str(e)}"
-        )
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"获取用户信息失败: {str(e)}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"获取用户信息失败: {str(e)}"
+#         )
 
 @app.post("/api/auth/refresh")
 async def refresh_token_endpoint(request: Request):
@@ -360,3 +367,43 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", 8000)),
         reload=True
     )
+
+
+@app.post("/api/auth/userinfo")
+async def get_user_info_by_auth_code(request: UserInfoRequest):
+    """通过authCode获取用户信息API"""
+    try:
+        # 兼容两种参数名：authCode 和 auth_code
+        auth_code = request.authCode or request.auth_code
+        if not auth_code:
+            logger.error("授权码为空")
+            raise HTTPException(status_code=400, detail="授权码不能为空")
+        
+        logger.info(f"开始获取访问令牌，授权码: {auth_code[:10]}...")
+        # 使用授权码获取访问令牌
+        token_info = alipay_service.get_access_token(auth_code)
+        logger.info(f"成功获取访问令牌")
+        
+        # 使用访问令牌获取用户信息
+        logger.info(f"开始获取用户信息")
+        user_info = alipay_service.get_user_info(token_info['access_token'])
+        logger.info(f"成功获取用户信息")
+        
+        return {
+            "success": True,
+            "data": {
+                "user_info": user_info,
+                "token_info": {
+                    "access_token": token_info['access_token'],
+                    "expires_in": token_info['expires_in'],
+                    "refresh_token": token_info.get('refresh_token', '')
+                }
+            },
+            "message": "获取用户信息成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取用户信息失败，详细错误: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取用户信息失败: {str(e)}")

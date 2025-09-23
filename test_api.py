@@ -12,7 +12,7 @@ def test_auth_info_api():
     print("=== 测试authInfo API接口 ===")
     
     base_url = "http://localhost:8000"
-    test_pid = "2088151008240524"  # 正确的PID
+    test_pid = "2088102123816631"  # 示例PID
     
     try:
         # 测试GET方式的API
