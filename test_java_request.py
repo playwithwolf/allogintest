@@ -16,7 +16,7 @@ def test_java_authinfo_request():
     
     # 模拟Java代码发送的JSON格式（修改后）
     request_data = {
-        "pid": "9021000151657305",  # Java代码中的appId参数
+        "pid": "2088151008240524",  # Java代码中的appId参数
         "rsa2": True  # Java代码中的rsa2参数
     }
     
